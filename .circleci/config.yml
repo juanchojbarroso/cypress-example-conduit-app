@@ -11,30 +11,22 @@ jobs:
       - checkout
       - node/install-packages:
           pkg-manager: npm
-      # Install node
-      - node/install
-      # Install npm
-      - node/install-npm
-      # Download and cache dependencies
-      - node/with-cache:
-          steps:
-            - run:
-                name: Install application dependencies
-                command: npm run postinstall
-          # Save cache
-          cache-key: package.json
-          # Ignore non-checksum cache hits
-          use-strict-cache: true
+      - run:
+          command: npm install
+          name: Install dependecies cypress
+      - run:
+          command: npm run postinstall
+          name: Install dependecies client and server
       - run:
           command: npm run test:coverage
           name: Run tests e2e
       - run:
           command: npm run build
           name: Build client app
-      - persist_to_workspace:
-          root: ~/project
-          paths:
-            - .
+      # - persist_to_workspace:
+      #     root: ~/project
+      #     paths:
+      #       - .
   # Build-Push-Image-Docker:
   #   description: Build and push image to Google Container Registry
   #   machine: true
