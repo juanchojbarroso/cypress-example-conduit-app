@@ -1,14 +1,12 @@
 
-
 # see orb options at
 # https://github.com/cypress-io/circleci-orb
 version: 2.1
 orbs:
-  cypress: cypress-io/cypress@2
-  node: circleci/node@1.0.1
-  gcp-gke: circleci/gcp-gke@0.1.0
-  gcr: circleci/gcp-gcr@0.0.2
-
+  cypress: cypress-io/cypress@1
+  gcp-gke: circleci/gcp-gke@1.0.4
+  gcr: circleci/gcp-gcr@0.7.1
+  
 executors:
   latest:
     docker:
@@ -81,59 +79,48 @@ jobs:
               --report-dir coverage
       - store_artifacts:
           path: coverage
-      # send code coverage to coveralls.io
-      # https://coveralls.io/github/cypress-io/cypress-example-realworld
       - run:
           command: npm run coveralls || true
-  build:
-    description: Install npm
-    # machine option runs your jobs in a dedicated, ephemeral VM that has the following specifications:
+
+  delivery-client:
     machine: true
     steps:
-      - checkout
-      # Install node
-      - node/install
-      # Install npm
-      - node/install-npm
-      # Download and cache dependencies
-      - node/with-cache:
-          steps:
-            - run:
-                name: Install application dependencies
-                command: npm install
-          # Save cache
-          cache-key: package.json
-          # Ignore non-checksum cache hits
-          use-strict-cache: true
-  Build-Push-Image-Docker:
-    description: Build and push image to Google Container Registry
+        - checkout
+        - run: |
+            echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+        - run: cd client && docker build -t juanchojbarroso/realworld-client:latest .
+        - run: docker push juanchojbarroso/realworld-client:latest
+
+  delivery-server:
     machine: true
     steps:
-      - checkout
-      - gcr/gcr-auth
-      - gcr/build-image:
-          image: circle-gke
-          tag: "v2" #Change version number e.g to 'v3' when updating application
-      - gcr/push-image:
-          image: circle-gke
-          tag: "v2" #Change version number e.g to 'v3' when updating application
-    
+        - checkout
+        - run: |
+            echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+        - run: cd server && docker build -t realworld-server:latest .
+        - run: docker push realworld-server:latest
+
   deploy:
-    description: Deploy application to Google Kubernetes Engine
+    description: Deploy new version of realword app
     machine: true
     steps:
-      # Install `gcloud` and `kubectl` if not already installed.
       - gcp-gke/install
-      # Initialize the `gcloud` CLI.
-      - gcp-gke/init
-      # Update a deployment Docker image.
+      - gcp-gke/update-kubeconfig-with-credentials:
+          cluster: realworld-cluster
+          perform-login: true
       - gcp-gke/rollout-image:
-          deployment: circle-ci-cluster
-          container: dominic-backend
-          image: gcr.io/circle-ci-demo/circle-gke:v2 # change version when upda
+          cluster:  realworld-cluster
+          deployment: realworld-client
+          container: realworld-client
+          image: juanchojbarroso/realworld-client
+      - gcp-gke/rollout-image:
+          cluster:  realworld-cluster
+          deployment: realworld-server
+          container: realworld-server
+          image: juanchojbarroso/realworld-server
 
 workflows:
-  run_test:
+  build:
     jobs:
       - cypress/install:
           executor: latest
@@ -149,8 +136,7 @@ workflows:
           no-workspace: true
           start: npm run start:coverage
           wait-on: http://localhost:4100
-        #  record: true
-        
+          record: true
           post-steps:
             - store_artifacts:
                 path: coverage
@@ -164,14 +150,10 @@ workflows:
           requires:
             - cypress/run
 
-  build_update_deploy:
-    requires:
-      - run_test
-    jobs:
-      - build
-      - Build-Push-Image-Docker:
-          requires:
-            - build
+      - delivery-client
+      - delivery-server
+
       - deploy:
           requires:
-            - Build-Push-Image-Docker
+            - delivery-client
+            - delivery-server
