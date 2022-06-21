@@ -97,7 +97,7 @@ jobs:
         - checkout
         - run: |
             echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-        - run: cd server && docker build -t realworld-server:latest .
+        - run: cd server && docker build -t juanchojbarroso/realworld-server:latest .
         - run: docker push juanchojbarroso/realworld-server:latest
 
   deploy:
