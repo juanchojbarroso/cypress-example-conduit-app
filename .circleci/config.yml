@@ -1,21 +1,62 @@
-version: 2
+version: 2.1
+orbs:
+  node: circleci/node@1.0.1
+  # gcp-gke: circleci/gcp-gke@0.1.0
+  # gcr: circleci/gcp-gcr@0.0.2
 jobs:
   build:
-    docker:
-      - image: node:12.16.2
-      - image: cypress/browsers:node12.13.0-chrome78-ff70
-    parallelism: 4
-    working_directory: ~/repo
-
+    description: Install npm
+    # machine option runs your jobs in a dedicated, ephemeral VM that has the following specifications:
+    machine: true
     steps:
       - checkout
+      # Install node
+      - node/install
+      # Install npm
+      - node/install-npm
+      # Download and cache dependencies
+      - node/with-cache:
+          steps:
+            - run:
+                name: Install application dependencies
+                command: npm install
+          # Save cache
+          cache-key: package.json
+          # Ignore non-checksum cache hits
+          use-strict-cache: true
+  # Build-Push-Image-Docker:
+  #   description: Build and push image to Google Container Registry
+  #   machine: true
+  #   steps:
+  #     - checkout
+  #     - gcr/gcr-auth
+  #     - gcr/build-image:
+  #         image: circle-gke
+  #         tag: "v2" #Change version number e.g to 'v3' when updating application
+  #     - gcr/push-image:
+  #         image: circle-gke
+  #         tag: "v2" #Change version number e.g to 'v3' when updating application
 
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "package.json" }}
-            # fallback to using the latest cache if no exact match is found
-            - v1-dependencies-
-
-      - run: npm install
-      - run: npm run postinstall
-      - run: npm run test:coverage
+  # deploy:
+  #   description: Deploy application to Google Kubernetes Engine
+  #   machine: true
+  #   steps:
+  #     # Install `gcloud` and `kubectl` if not already installed.
+  #     - gcp-gke/install
+  #     # Initialize the `gcloud` CLI.
+  #     - gcp-gke/init
+  #     # Update a deployment Docker image.
+  #     - gcp-gke/rollout-image:
+  #         deployment: circle-ci-cluster
+  #         container: dominic-backend
+  #         image: gcr.io/circle-ci-demo/circle-gke:v2 # change version when updating
+workflows:
+  build_update_deploy:
+    jobs:
+      - build
+      # - Build-Push-Image-Docker:
+      #     requires:
+      #       - build
+      # - deploy:
+      #     requires:
+      #       - Build-Push-Image-Docker
