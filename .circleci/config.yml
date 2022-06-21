@@ -1,23 +1,176 @@
+
+
+# see orb options at
+# https://github.com/cypress-io/circleci-orb
 version: 2.1
 orbs:
   cypress: cypress-io/cypress@1
+  node: circleci/node@1.0.1
+  gcp-gke: circleci/gcp-gke@0.1.0
+  gcr: circleci/gcp-gcr@0.0.2
+
 executors:
-  with-chrome:
-    resource_class: small
+  latest:
     docker:
-      - image: "cypress/browsers:node14.16.0-chrome90-ff88"
+      - image: cypress/browsers:node12.13.0-chrome78-ff70
+
+commands:
+  save-partial-coverage-report:
+    description: |
+      Saves a single possibly partial coverage report by adding it to the
+      workspace. This way different CircleCI jobs can run parts of the tests
+      and save their results to be merged later.
+    parameters:
+      coverage-filename:
+        type: string
+        default: coverage/coverage-final.json
+        description: |
+          Path to the final coverage JSON file produced by "nyc" tool.
+          Typically called "coverage/coverage-final.json"
+      label:
+        type: string
+        default: default
+        description: |
+          Human name for the coverage file. For example, when saving both Cypress
+          and Jest coverage file, use "cypress" and "jest" to have distinct filenames.
+    steps:
+      # do not crash if the coverage is not found
+      # because a particular CI job might not have any tests to run
+      # producing no coverage.
+      - run: mkdir coverage-part || true
+      - run: touch coverage-part/.placeholder || true
+      # use unique job id to avoid accidentally overwriting coverage file
+      # and in case the build is parallel, use node index too
+      - run: cp <<parameters.coverage-filename>> coverage-part/coverage-<<parameters.label>>-$CIRCLE_WORKFLOW_JOB_ID-index-$CIRCLE_NODE_INDEX.json || true
+      - run: ls -la coverage-part
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            # note that the current folder is "project"
+            # so we need to save the full path correctly
+            # otherwise the files will not be restored in the expected location
+            - 'project/coverage-part/*'
+
+  merge-coverage-reports:
+    description: |
+      Merges individual code coverage files using "nyc" tool
+      https://github.com/istanbuljs/nyc.
+      All individual files should be in the folder "coverage-part"
+    steps:
+      - run: ls -la .
+      - run: ls -la coverage-part || true
+      - run: npx nyc merge coverage-part
+      - run: mkdir .nyc_output || true
+      # storing the combined report in ".nyc_output/out.json"
+      # allows other NYC commands to find it right away
+      - run: mv coverage.json .nyc_output/out.json
+      - run: ls -la .nyc_output
+
+jobs:
+  merge-coverage:
+    description: Merges individual code coverage files and sends combined data to Coveralls.io
+    executor: cypress/base-10
+    steps:
+      - attach_workspace:
+          at: ~/
+      - merge-coverage-reports
+      - run:
+          name: generate coverage report
+          command: |
+            npx nyc report \
+              --reporter lcov --reporter text-summary \
+              --report-dir coverage
+      - store_artifacts:
+          path: coverage
+      # send code coverage to coveralls.io
+      # https://coveralls.io/github/cypress-io/cypress-example-realworld
+      - run:
+          command: npm run coveralls || true
+  build:
+    description: Install npm
+    # machine option runs your jobs in a dedicated, ephemeral VM that has the following specifications:
+    machine: true
+    steps:
+      - checkout
+      # Install node
+      - node/install
+      # Install npm
+      - node/install-npm
+      # Download and cache dependencies
+      - node/with-cache:
+          steps:
+            - run:
+                name: Install application dependencies
+                command: npm install
+          # Save cache
+          cache-key: package.json
+          # Ignore non-checksum cache hits
+          use-strict-cache: true
+  Build-Push-Image-Docker:
+    description: Build and push image to Google Container Registry
+    machine: true
+    steps:
+      - checkout
+      - gcr/gcr-auth
+      - gcr/build-image:
+          image: circle-gke
+          tag: "v2" #Change version number e.g to 'v3' when updating application
+      - gcr/push-image:
+          image: circle-gke
+          tag: "v2" #Change version number e.g to 'v3' when updating application
+    
+  deploy:
+    description: Deploy application to Google Kubernetes Engine
+    machine: true
+    steps:
+      # Install `gcloud` and `kubectl` if not already installed.
+      - gcp-gke/install
+      # Initialize the `gcloud` CLI.
+      - gcp-gke/init
+      # Update a deployment Docker image.
+      - gcp-gke/rollout-image:
+          deployment: circle-ci-cluster
+          container: dominic-backend
+          image: gcr.io/circle-ci-demo/circle-gke:v2 # change version when upda
+
 workflows:
   build:
     jobs:
-      - cypress/install
+      - cypress/install:
+          executor: latest
+          pre-steps:
+            - run: npm config set unsafe-perm true
+
       - cypress/run:
           requires:
             - cypress/install
-          executor: with-chrome
-          browser: chrome
+          executor: latest
+          parallel: true
+          parallelism: 2
+          no-workspace: true
+          start: npm run start:coverage
+          wait-on: http://localhost:4100
+        #  record: true
+        
           post-steps:
-            - run: ls
-            - store_test_results:
-                path: cypress/results
             - store_artifacts:
-                path: cypress/screenshots
+                path: coverage
+            # if this machine had no tests to run
+            # there will be no coverage report
+            - run: npx nyc report --reporter=text || true
+            - save-partial-coverage-report:
+                label: e2e
+
+      - merge-coverage:
+          requires:
+            - cypress/run
+
+  build_update_deploy:
+    jobs:
+      - build
+      - Build-Push-Image-Docker:
+          requires:
+            - build
+      - deploy:
+          requires:
+            - Build-Push-Image-Docker
