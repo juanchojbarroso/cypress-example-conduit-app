@@ -50,7 +50,6 @@ commands:
             # so we need to save the full path correctly
             # otherwise the files will not be restored in the expected location
             - 'project/coverage-part/*'
-
   merge-coverage-reports:
     description: |
       Merges individual code coverage files using "nyc" tool
@@ -134,7 +133,7 @@ jobs:
           image: gcr.io/circle-ci-demo/circle-gke:v2 # change version when upda
 
 workflows:
-  build:
+  run_test:
     jobs:
       - cypress/install:
           executor: latest
@@ -166,6 +165,8 @@ workflows:
             - cypress/run
 
   build_update_deploy:
+    requires:
+      - run_test
     jobs:
       - build
       - Build-Push-Image-Docker:
