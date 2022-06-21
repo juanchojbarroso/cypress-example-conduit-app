@@ -1,21 +1,21 @@
-# The first instruction is what image we want to base our container on
-# We Use an official Node version 10 image as a parent image
-FROM node:10
+# Set the base image to use for subsequent instructions
+FROM node:12
 
-# Create app directory for Real World React example app
-# NOTE: all the directives that follow in the Dockerfile will be executed in
-# that directory.
+# Create app directory
 WORKDIR /usr/src/app
 
-# Copy the package.json file into our app directory
-COPY . /usr/src/app/
+# Install app dependencies
+# A wildcard is used to ensure both package.json AND package-lock.json are copied
+# where available (npm@5+)
+COPY package*.json ./
 
-# Install any needed packages specified in package.json
 RUN npm install
+# If you are building your code for production
+# RUN npm ci --only=production
 
-RUN ls /usr/src/app
-RUN ls /usr/src/app/public
+# Bundle app source
+COPY . .
 
-EXPOSE 4100
 
-CMD npm start
+EXPOSE 3000
+CMD [ "npm", "start" ]
