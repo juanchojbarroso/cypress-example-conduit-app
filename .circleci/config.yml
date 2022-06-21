@@ -110,11 +110,13 @@ jobs:
           perform-login: true
       - gcp-gke/rollout-image:
           cluster:  realworld-cluster
+          namespace: realworld
           deployment: realworld-client
           container: realworld-client
           image: juanchojbarroso/realworld-client
       - gcp-gke/rollout-image:
           cluster:  realworld-cluster
+          namespace: realworld
           deployment: realworld-server
           container: realworld-server
           image: juanchojbarroso/realworld-server
